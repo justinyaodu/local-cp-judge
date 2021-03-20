@@ -8,7 +8,8 @@ CFLAGS='-lm -O2 -Wall'
 CXX='g++'
 CXXFLAGS='-std=c++17 -O2 -Wall'
 
-JC='javac'
+JAVA='java'
+JAVAC='javac'
 JFLAGS='-Xlint:all'
 JRUN=''
 
@@ -73,55 +74,54 @@ read_file() {
 
 ######## Judge Functions ########
 
-# Compile source code.
-compile() {
+get_compile_cmd() {
 	local src_file="${1}"
 
 	case "${src_file}" in
 		*.c)
-			${CC} ${CFLAGS} "${src_file}" -o "$(base_path "${src_file}")"
+			compile_cmd=(${CC} ${CFLAGS} "${src_file}" -o "$(base_path "${src_file}")")
 			return
 			;;
 		*.cc|*.cpp|*.cxx)
-			${CXX} ${CXXFLAGS} "${src_file}" -o "$(base_path "${src_file}")"
+			compile_cmd=(${CXX} ${CXXFLAGS} "${src_file}" -o "$(base_path "${src_file}")")
 			return
 			;;
 		*.java)
-			${JC} ${JFLAGS} "${src_file}"
+			compile_cmd=(${JAVAC} ${JFLAGS} "${src_file}")
 			return
 			;;
 		*.py)
-			${PY} ${PYFLAGS} "${src_file}"
+			compile_cmd=(${PY} ${PYFLAGS} "${src_file}")
 			return
 			;;
+		*)
+			log "Cannot compile '${src_file}'; language not recognized."
+			return 1
+			;;
 	esac
-
-	log "Cannot compile '${src_file}'; language not recognized."
-	return 1
 }
 
-# Run the compiled executable corresponding to a source code file.
-run() {
+get_run_cmd() {
 	local src_file="${1}"
 
 	case "${src_file}" in
 		*.c|*.cc|*.cpp|*.cxx)
-			"$(base_path "${src_file}")"
+			run_cmd=("$(base_path "${src_file}")")
 			return
 			;;
 		*.java)
 			local class_name="${src_file%.*}"
-			java ${JRUN} -classpath "$(dirname "${src_file}")" "${class_name}"
+			run_cmd=(${JAVA} ${JRUN} -classpath "$(dirname "${src_file}")" "${class_name}")
 			return
 			;;
 		*.py)
-			${PY} ${PYRUN} "${src_file}"
+			run_cmd=(${PY} ${PYRUN} "${src_file}")
 			return
 			;;
+		*)
+			log "Cannot run '${src_file}'; language not recognized."
+			return 1
 	esac
-
-	log "Cannot run '${src_file}'; language not recognized."
-	return 1
 }
 
 make_tests() {
@@ -178,14 +178,17 @@ copy_tests() {
 	done
 }
 
-wrapped_compile() {
+compile() {
 	local src_file="${1}"
 
 	local dir="$(dirname "${src_file}")"
 	local compile_out="${dir}/_compile.out"
 	local compile_err="${dir}/_compile.err"
 
-	compile "${src_file}" > "${compile_out}" 2> "${compile_err}"
+	get_compile_cmd "${src_file}" || return
+
+	log "Compiling:$(printf ' %q' "${compile_cmd[@]}")"
+	"${compile_cmd[@]}" > "${compile_out}" 2> "${compile_err}"
 	local compile_status="$?"
 
 	show_file "${compile_out}" "Compiler standard output"
@@ -195,9 +198,8 @@ wrapped_compile() {
 	return "${compile_status}"
 }
 
-wrapped_run() {
-	local src_file="${1}"
-	local test_in="${2}"
+run() {
+	local test_in="${1}"
 
 	local test_base="$(base_path "${test_in}")"
 	local test_name="$(basename "${test_base}")"
@@ -205,11 +207,12 @@ wrapped_run() {
 	local test_my="${test_base}.my"
 	local test_err="${test_base}.err"
 
-	log "Running test ${test_name}..."
-	run "${src_file}" < "${test_in}" > "${test_my}" 2> "${test_err}"
-	local run_status="$?"
+	log "Running test ${test_name}:$(printf ' %q' "${run_cmd[@]}")"
+	"${run_cmd[@]}" < "${test_in}" > "${test_my}" 2> "${test_err}"
 
+	local run_status="$?"
 	(( run_status )) && log "Exited with status ${run_status}."
+
 	show_file "${test_err}" "Standard error"
 
 	local test_out="${test_base}.out"
@@ -318,7 +321,9 @@ main() {
 
 	cp "${orig_src_file}" "${tmp_dir}"
 	local tmp_src_file="${tmp_dir}/${src_file}"
-	wrapped_compile "${tmp_src_file}"
+	compile "${tmp_src_file}" || return
+
+	get_run_cmd "${tmp_src_file}" || return
 
 	if (( interactive )); then
 		log "Enter test case input, followed by EOF (Ctrl+D):"
@@ -326,7 +331,7 @@ main() {
 	fi
 
 	for test_in in "${tmp_dir}"/*.in; do
-		wrapped_run "${tmp_src_file}" "${test_in}"
+		run "${test_in}"
 	done
 }
 
