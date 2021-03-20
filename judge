@@ -33,14 +33,14 @@ die_usage() {
 	exit 1
 }
 
-# base_path <file>
 # Remove the file extension and make the parent directory explicit.
 base_path() {
-	local base="$(basename "${1}")"
+	local file="${1}"
+
+	local base="$(basename "${file}")"
 	echo "$(dirname "${1}")/${base%.*}"
 }
 
-# show_file <file> <description>
 # Display a file if it is not empty.
 show_file() {
 	local file="${1}"
@@ -52,55 +52,97 @@ show_file() {
 	fi
 }
 
+# Read a file from standard input, terminated by a delimiter.
+# Return zero if one or more lines were entered.
+read_file() {
+	local file="${1}"
+	local delimiter="${2}"
+	local description="${3}"
+
+	log "Enter file contents, then a line with the delimiter '${delimiter}'."
+	log "${description} (${file}):"
+
+	local num_lines=0
+	local line
+	while IFS= read -r line; do
+		[ "${line}" == "${delimiter}" ] && return $(( num_lines == 0 ))
+		echo "${line}" >> "${file}"
+		(( num_lines++ ))
+	done
+}
+
 ######## Judge Functions ########
 
-# compile <src_file>
 # Compile source code.
 compile() {
-	case "${1}" in
+	local src_file="${1}"
+
+	case "${src_file}" in
 		*.c)
-			${CC} ${CFLAGS} "${1}" -o "$(base_path "${1}")"
+			${CC} ${CFLAGS} "${src_file}" -o "$(base_path "${src_file}")"
 			return
 			;;
 		*.cc|*.cpp|*.cxx)
-			${CXX} ${CXXFLAGS} "${1}" -o "$(base_path "${1}")"
+			${CXX} ${CXXFLAGS} "${src_file}" -o "$(base_path "${src_file}")"
 			return
 			;;
 		*.java)
-			${JC} ${JFLAGS} "${1}"
+			${JC} ${JFLAGS} "${src_file}"
 			return
 			;;
 		*.py)
-			${PY} ${PYFLAGS} "${1}"
+			${PY} ${PYFLAGS} "${src_file}"
 			return
 			;;
 	esac
 
-	log "Cannot compile '${1}'; language not recognized."
+	log "Cannot compile '${src_file}'; language not recognized."
 	return 1
 }
 
-# run <src_file>
 # Run the compiled executable corresponding to a source code file.
 run() {
-	case "${1}" in
+	local src_file="${1}"
+
+	case "${src_file}" in
 		*.c|*.cc|*.cpp|*.cxx)
-			"$(base_path "${1}")"
+			"$(base_path "${src_file}")"
 			return
 			;;
 		*.java)
-			local class_name="${1%.*}"
-			java ${JRUN} -classpath "$(dirname "${1}")" "${class_name}"
+			local class_name="${src_file%.*}"
+			java ${JRUN} -classpath "$(dirname "${src_file}")" "${class_name}"
 			return
 			;;
 		*.py)
-			${PY} ${PYRUN} "${1}"
+			${PY} ${PYRUN} "${src_file}"
 			return
 			;;
 	esac
 
-	log "Cannot run '${1}'; language not recognized."
+	log "Cannot run '${src_file}'; language not recognized."
 	return 1
+}
+
+make_tests() {
+	local test_dir="${1}"
+
+	mkdir -p "${test_dir}"
+
+	local delimiter
+	IFS= read -r -p 'Delimiter: ' delimiter
+
+	local test_num=1
+	while [ -f "${test_dir}/${test_num}.in" ] || [ -f "${test_dir}/${test_num}.out" ]; do
+		(( test_num++ ))
+	done
+	(( test_num > 1 )) && log "Ignoring existing test cases 1-$(( test_num - 1 ))."
+
+	while :; do
+		log "Making test case ${test_num}. To cancel, enter an empty input file."
+		read_file "${test_dir}/${test_num}.in" "${delimiter}" "Input file" || break
+		read_file "${test_dir}/${test_num}.out" "${delimiter}" "Output file"
+	done
 }
 
 copy_tests() {
@@ -192,7 +234,8 @@ Usage: ${0} [OPTION]... SOURCE_CODE
 Compile and run source code against test cases.
 
     -h, --help          Show this help message.
-    -i, --interactive   use standard input instead of test case files
+    -i, --interactive   Read a one-off test case interactively.
+    -t, --make-tests    Make test case files interactively.
         --version       Show version information.
 EOF
 }
@@ -210,17 +253,23 @@ EOF
 
 main() {
 	local interactive=0
+	local make_tests=0
 	local orig_src_file=""
 
 	while (( $# )); do
-		case "${1}" in
+		local arg="${1}"
+		shift
+		case "${arg}" in
 			-h|--help)
 				usage
 				exit
 				;;
 			-i|--interactive)
 				interactive=1
-				shift
+				continue
+				;;
+			-t|--make-tests)
+				make_tests=1
 				continue
 				;;
 			--version)
@@ -231,8 +280,7 @@ main() {
 				die_usage "Unrecognized option '${1}'."
 				;;
 			*)
-				orig_src_file="${1}"
-				shift
+				orig_src_file="${arg}"
 				(( $# )) && die_usage "Trailing argument(s): '$*'."
 				break
 				;;
@@ -251,6 +299,7 @@ main() {
 	local tmp_dir="$(mktemp --tmpdir -d "judge-$(date +'%Y-%m-%d-%H-%M-%S')-XXXXXXXXXX")"
 
 	local test_dir="${orig_dir}/_$(tr '[:upper:]' '[:lower:]' <<< "${orig_src_file%.*}")"
+	(( make_tests )) && make_tests "${test_dir}"
 	if [ -d "${test_dir}" ]; then
 		copy_tests "${test_dir}" "${tmp_dir}"
 	else
