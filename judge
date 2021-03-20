@@ -294,6 +294,11 @@ main() {
 	[ "${orig_src_file}" ] || die_usage "No source code file specified."
 	[ -f "${orig_src_file}" ] || die "File does not exist: '${orig_src_file}'."
 
+	if ! [ -t 0 ] && (( !interactive )) && (( !make_tests )); then
+		log "Detected input redirection. Switching to interactive mode."
+		interactive=1
+	fi
+
 	local orig_dir="$(dirname "${orig_src_file}")"
 	local src_file="$(basename "${orig_src_file}")"
 
@@ -306,7 +311,7 @@ main() {
 	(( make_tests )) && make_tests "${test_dir}"
 	if [ -d "${test_dir}" ]; then
 		copy_tests "${test_dir}" "${tmp_dir}"
-	else
+	elif (( !interactive )); then
 		log "Tests directory '${test_dir}' does not exist. Switching to interactive mode."
 		interactive=1
 	fi
