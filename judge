@@ -1,0 +1,275 @@
+#!/bin/bash
+
+######## Default Config ########
+
+CC='gcc'
+CFLAGS='-lm -O2 -Wall'
+
+CXX='g++'
+CXXFLAGS='-std=c++17 -O2 -Wall'
+
+JC='javac'
+JFLAGS='-Xlint:all'
+JRUN=''
+
+PY='python'
+PYFLAGS='-m py_compile'
+PYRUN=''
+
+######## Utility Functions ########
+
+log() {
+	>&2 echo "$*"
+}
+
+die() {
+	log "$@"
+	exit 1
+}
+
+die_usage() {
+	log "$@"
+	log "Try '${0} --help' for more information."
+	exit 1
+}
+
+# base_path <file>
+# Remove the file extension and make the parent directory explicit.
+base_path() {
+	local base="$(basename "${1}")"
+	echo "$(dirname "${1}")/${base%.*}"
+}
+
+# show_file <file> <description>
+# Display a file if it is not empty.
+show_file() {
+	local file="${1}"
+	local description="${2}"
+
+	if [ -s "${file}" ]; then
+		echo "${2} (${file}):"
+		sed 's/^/\t/' < "${file}"
+	fi
+}
+
+######## Judge Functions ########
+
+# compile <src_file>
+# Compile source code.
+compile() {
+	case "${1}" in
+		*.c)
+			${CC} ${CFLAGS} "${1}" -o "$(base_path "${1}")"
+			return
+			;;
+		*.cc|*.cpp|*.cxx)
+			${CXX} ${CXXFLAGS} "${1}" -o "$(base_path "${1}")"
+			return
+			;;
+		*.java)
+			${JC} ${JFLAGS} "${1}"
+			return
+			;;
+		*.py)
+			${PY} ${PYFLAGS} "${1}"
+			return
+			;;
+	esac
+
+	log "Cannot compile '${1}'; language not recognized."
+	return 1
+}
+
+# run <src_file>
+# Run the compiled executable corresponding to a source code file.
+run() {
+	case "${1}" in
+		*.c|*.cc|*.cpp|*.cxx)
+			"$(base_path "${1}")"
+			return
+			;;
+		*.java)
+			local class_name="${1%.*}"
+			java ${JRUN} -classpath "$(dirname "${1}")" "${class_name}"
+			return
+			;;
+		*.py)
+			${PY} ${PYRUN} "${1}"
+			return
+			;;
+	esac
+
+	log "Cannot run '${1}'; language not recognized."
+	return 1
+}
+
+copy_tests() {
+	local test_dir="${1}"
+	local tmp_dir="${2}"
+
+	local test_file
+	for test_file in "${test_dir}"/*; do
+		local test_in="${test_file%.*}.in"
+		local test_out="${test_file%.*}.out"
+		case "${test_file}" in
+			*.in)
+				if [ -f "${test_out}" ]; then
+					cp "${test_in}" "${test_out}" "${tmp_dir}"
+				else
+					log "Input file '${test_in}' does not have a corresponding output file '${test_out}'."						
+				fi
+				;;
+
+			*.out)
+				if ! [ -f "${test_in}" ]; then
+					log "Output file '${test_out}' does not have a corresponding input file '${test_in}'."
+				fi
+				;;
+			*)
+				log "Stray file '${test_file}' in tests directory."
+				;;
+		esac
+	done
+}
+
+wrapped_compile() {
+	local src_file="${1}"
+
+	local dir="$(dirname "${src_file}")"
+	local compile_out="${dir}/_compile.out"
+	local compile_err="${dir}/_compile.err"
+
+	compile "${src_file}" > "${compile_out}" 2> "${compile_err}"
+	local compile_status="$?"
+
+	show_file "${compile_out}" "Compiler standard output"
+	show_file "${compile_err}" "Compiler standard error"
+
+	(( compile_status )) && die "Compilation failed."
+	return "${compile_status}"
+}
+
+wrapped_run() {
+	local src_file="${1}"
+	local test_in="${2}"
+
+	local test_base="$(base_path "${test_in}")"
+	local test_name="$(basename "${test_base}")"
+
+	local test_my="${test_base}.my"
+	local test_err="${test_base}.err"
+
+	log "Running test ${test_name}..."
+	run "${src_file}" < "${test_in}" > "${test_my}" 2> "${test_err}"
+	local run_status="$?"
+
+	(( run_status )) && log "Exited with status ${run_status}."
+	show_file "${test_err}" "Standard error"
+
+	local test_out="${test_base}.out"
+	if [ -f "${test_out}" ]; then
+		local diff_width=$(( $(wc -L < "${test_my}") + $(wc -L < "${test_out}") + 16 ))
+		local test_diff="${test_base}.diff"
+		diff --color=always --side-by-side --suppress-common-lines --width=${diff_width} \
+			"${test_my}" "${test_out}" > "${test_diff}"
+		local diff_status="$?"
+
+		if (( diff_status )); then
+			log "Test failed."
+			show_file "${test_in}" "Standard input"
+			show_file "${test_diff}" "Diff .my | .out"
+		else
+			log "Test passed."
+		fi
+	else
+		show_file "${test_my}" "Standard output"
+	fi
+}
+
+usage() {
+	cat << EOF
+Usage: ${0} [OPTION]... SOURCE_CODE
+Compile and run source code against test cases.
+
+    -h, --help          Show this help message.
+    -i, --interactive   use standard input instead of test case files
+        --version       Show version information.
+EOF
+}
+
+version() {
+	cat << EOF
+local-cp-judge 0.1.1
+
+Copyright (C) 2021 Justin Yao Du.
+Licensed under the MIT License.
+
+GitHub: https://github.com/justinyaodu/local-cp-judge
+EOF
+}
+
+main() {
+	local interactive=0
+	local orig_src_file=""
+
+	while (( $# )); do
+		case "${1}" in
+			-h|--help)
+				usage
+				exit
+				;;
+			-i|--interactive)
+				interactive=1
+				shift
+				continue
+				;;
+			--version)
+				version
+				exit
+				;;
+			-*)
+				die_usage "Unrecognized option '${1}'."
+				;;
+			*)
+				orig_src_file="${1}"
+				shift
+				(( $# )) && die_usage "Trailing argument(s): '$*'."
+				break
+				;;
+		esac
+	done
+
+	[ "${orig_src_file}" ] || die_usage "No source code file specified."
+	[ -f "${orig_src_file}" ] || die "File does not exist: '${orig_src_file}'."
+
+	local orig_dir="$(dirname "${orig_src_file}")"
+	local src_file="$(basename "${orig_src_file}")"
+
+	local judgerc="${orig_dir}/judgerc"
+	[ -f "${judgerc}" ] && source "${judgerc}"
+
+	local tmp_dir="$(mktemp --tmpdir -d "judge-$(date +'%Y-%m-%d-%H-%M-%S')-XXXXXXXXXX")"
+
+	local test_dir="${orig_dir}/_$(tr '[:upper:]' '[:lower:]' <<< "${orig_src_file%.*}")"
+	if [ -d "${test_dir}" ]; then
+		copy_tests "${test_dir}" "${tmp_dir}"
+	else
+		log "Tests directory '${test_dir}' does not exist. Switching to interactive mode."
+		interactive=1
+	fi
+
+	cp "${orig_src_file}" "${tmp_dir}"
+	local tmp_src_file="${tmp_dir}/${src_file}"
+	wrapped_compile "${tmp_src_file}"
+
+	if (( interactive )); then
+		log "Enter test case input, followed by EOF (Ctrl+D):"
+		cat > "${tmp_dir}/_interactive.in"
+	fi
+
+	for test_in in "${tmp_dir}"/*.in; do
+		wrapped_run "${tmp_src_file}" "${test_in}"
+	done
+}
+
+main "$@"
