@@ -30,7 +30,7 @@ die() {
 
 die_usage() {
 	log "$@"
-	log "Try '${0} --help' for more information."
+	log "Try 'judge --help' for more information."
 	exit 1
 }
 
@@ -237,7 +237,7 @@ run() {
 
 usage() {
 	cat << EOF
-Usage: ${0} [OPTION]... SOURCE_CODE
+Usage: judge [OPTION]... SOURCE_CODE
 Compile and run source code against test cases.
 
     -h, --help          Show this help message.
