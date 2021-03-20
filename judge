@@ -132,16 +132,20 @@ make_tests() {
 	local delimiter
 	IFS= read -r -p 'Delimiter: ' delimiter
 
-	local test_num=1
-	while [ -f "${test_dir}/${test_num}.in" ] || [ -f "${test_dir}/${test_num}.out" ]; do
-		(( test_num++ ))
-	done
-	(( test_num > 1 )) && log "Ignoring existing test cases 1-$(( test_num - 1 ))."
+	local test_num
+	for (( test_num = 1; ; test_num++ )); do
+		local test_base="${test_dir}/${test_num}"
+		local test_in="${test_base}.in"
+		local test_out="${test_base}.out"
 
-	while :; do
+		if [ -f "${test_in}" ] || [ -f "${test_out}" ]; then
+			log "Test case ${test_num} already exists, skipping."
+			continue
+		fi
+
 		log "Making test case ${test_num}. To cancel, enter an empty input file."
-		read_file "${test_dir}/${test_num}.in" "${delimiter}" "Input file" || break
-		read_file "${test_dir}/${test_num}.out" "${delimiter}" "Output file"
+		read_file "${test_in}" "${delimiter}" "Input file" || break
+		read_file "${test_out}" "${delimiter}" "Output file"
 	done
 }
 
@@ -242,7 +246,7 @@ EOF
 
 version() {
 	cat << EOF
-local-cp-judge 0.1.1
+local-cp-judge 0.1.2
 
 Copyright (C) 2021 Justin Yao Du.
 Licensed under the MIT License.
