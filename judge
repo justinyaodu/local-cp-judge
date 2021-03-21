@@ -110,7 +110,8 @@ get_run_cmd() {
 			return
 			;;
 		*.java)
-			local class_name="${src_file%.*}"
+			local base_name="$(basename "${src_file}")"
+			local class_name="${base_name%.java}"
 			run_cmd=(${JAVA} ${JRUN} -classpath "$(dirname "${src_file}")" "${class_name}")
 			return
 			;;
