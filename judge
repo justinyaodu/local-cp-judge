@@ -306,7 +306,7 @@ main() {
 	local orig_dir="$(dirname "${orig_src_file}")"
 	local src_file="$(basename "${orig_src_file}")"
 
-	local judgerc="${orig_dir}/judgerc"
+	local judgerc="${orig_dir}/.judgerc"
 	[ -f "${judgerc}" ] && source "${judgerc}"
 
 	local tmp_dir="$(mktemp --tmpdir -d "judge-$(date +'%Y-%m-%d-%H-%M-%S')-XXXXXXXXXX")"
