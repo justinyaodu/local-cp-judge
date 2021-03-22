@@ -3,10 +3,10 @@
 ######## Default Config ########
 
 CC='gcc'
-CFLAGS='-lm -O2 -Wall'
+CFLAGS='-lm -O2 -Wall -fdiagnostics-color=always'
 
 CXX='g++'
-CXXFLAGS='-std=c++17 -O2 -Wall'
+CXXFLAGS='-std=c++17 -O2 -Wall -fdiagnostics-color=always'
 
 JAVA='java'
 JAVAC='javac'
@@ -17,20 +17,45 @@ PY='python'
 PYFLAGS='-m py_compile'
 PYRUN=''
 
+indent=$'\t'
+
+get_test_dir() {
+	local src_file="${1}"
+	echo "_$(tr '[:upper:]' '[:lower:]' <<< "${src_file%.*}")"
+}
+
 ######## Utility Functions ########
 
 log() {
-	>&2 echo "$*"
+	local message="${1}"
+	local num_indents="${2:0}"
+	local tput_letter="${3}"
+
+	if [ "${tput_letter}" ]; then
+		local tp_var="tp_${tput_letter}"
+		local prefix="${!tp_var}"
+		local suffix="${tp_n}"
+	else
+		local prefix=''
+		local suffix=''
+	fi
+
+	local i
+	for (( i = num_indents; i > 0; i-- )); do
+		>&2 echo -n "${indent}"
+	done
+
+	>&2 echo "${prefix}${message}${suffix}"
 }
 
 die() {
-	log "$@"
+	log "${1}" 0 r
 	exit 1
 }
 
 die_usage() {
-	log "$@"
-	log "Try 'judge --help' for more information."
+	log "${1}" 0 r
+	log "Try 'judge --help' for more information"
 	exit 1
 }
 
@@ -46,30 +71,67 @@ base_path() {
 show_file() {
 	local file="${1}"
 	local description="${2}"
+	local num_indents="${3}"
+	local to_stdout="${4:0}"
 
 	if [ -s "${file}" ]; then
-		echo "${2} (${file}):"
-		sed 's/^/\t/' < "${file}"
+		log "${2} (${tp_s}${file}${tp_n}):" "${num_indents}"
+
+		if (( to_stdout )); then
+			cat "${file}"
+		else
+			local indents=""
+			local i
+			for (( i = num_indents + 1; i > 0; i-- )); do
+				indents+="${indent}"
+			done
+
+			# HACK: The colored diff output sometimes contains ANSI escape sequences
+			# after the final \n, so s/^/${indents}/ results in incorrect indentation.
+			>&2 sed -Ez "s/[^\n]*\n/${indents}&/g" < "${file}"
+		fi
 	fi
 }
 
-# Read a file from standard input, terminated by a delimiter.
-# Return zero if one or more lines were entered.
+# Format an array representing a command and its arguments.
+format_cmd() {
+	declare -n array="${1}"
+	(( ${#array[@]} > 0 )) && printf '%q' "${array[0]}"
+	(( ${#array[@]} > 1 )) && printf ' %q' "${array[@]:1}"
+}
+
+# Read a file from standard input, terminated by a delimiter. If the delimiter is a newline
+# character (\n), read until the end of input. Return zero if at least one line was read.
 read_file() {
 	local file="${1}"
 	local delimiter="${2}"
 	local description="${3}"
+	local num_indents="${4}"
 
-	log "Enter file contents, then a line with the delimiter '${delimiter}'."
-	log "${description} (${file}):"
+	log "${description} (${tp_s}${file}${tp_n}):" "${num_indents}"
 
 	local num_lines=0
 	local line
 	while IFS= read -r line; do
-		[ "${line}" == "${delimiter}" ] && return $(( num_lines == 0 ))
+		[ "${line}" == "${delimiter}" ] && break
 		echo "${line}" >> "${file}"
 		(( num_lines++ ))
 	done
+
+	(( num_lines > 0 ))
+}
+
+heading() {
+	log "${1}:" 0 b
+}
+
+enable_color() {
+	tp_n="$(tput sgr0)"
+	tp_b="$(tput bold)"
+	tp_r="$(tput setaf 1)"
+	tp_g="$(tput setaf 2)"
+	tp_y="$(tput setaf 3)"
+	tp_s="$(tput setaf 8)"
 }
 
 ######## Judge Functions ########
@@ -80,22 +142,17 @@ get_compile_cmd() {
 	case "${src_file}" in
 		*.c)
 			compile_cmd=(${CC} ${CFLAGS} "${src_file}" -o "$(base_path "${src_file}")")
-			return
 			;;
 		*.cc|*.cpp|*.cxx)
 			compile_cmd=(${CXX} ${CXXFLAGS} "${src_file}" -o "$(base_path "${src_file}")")
-			return
 			;;
 		*.java)
 			compile_cmd=(${JAVAC} ${JFLAGS} "${src_file}")
-			return
 			;;
 		*.py)
 			compile_cmd=(${PY} ${PYFLAGS} "${src_file}")
-			return
 			;;
 		*)
-			log "Cannot compile '${src_file}'; language not recognized."
 			return 1
 			;;
 	esac
@@ -107,32 +164,34 @@ get_run_cmd() {
 	case "${src_file}" in
 		*.c|*.cc|*.cpp|*.cxx)
 			run_cmd=("$(base_path "${src_file}")")
-			return
 			;;
 		*.java)
-			local base_name="$(basename "${src_file}")"
-			local class_name="${base_name%.java}"
+			local class_name="$(basename "${src_file}" '.java')"
 			run_cmd=(${JAVA} ${JRUN} -classpath "$(dirname "${src_file}")" "${class_name}")
-			return
 			;;
 		*.py)
 			run_cmd=(${PY} ${PYRUN} "${src_file}")
-			return
 			;;
 		*)
-			log "Cannot run '${src_file}'; language not recognized."
 			return 1
+			;;
 	esac
 }
 
 make_tests() {
 	local test_dir="${1}"
 
+	(( make_tests )) || return 0
+
+	heading "Making test files"
+
 	mkdir -p "${test_dir}"
 
+	(( interactive )) && log "Delimiter line:" 1
 	local delimiter
-	IFS= read -r -p 'Delimiter: ' delimiter
+	IFS= read -r delimiter
 
+	local tests_made=0
 	local test_num
 	for (( test_num = 1; ; test_num++ )); do
 		local test_base="${test_dir}/${test_num}"
@@ -140,20 +199,37 @@ make_tests() {
 		local test_out="${test_base}.out"
 
 		if [ -f "${test_in}" ] || [ -f "${test_out}" ]; then
-			log "Test case ${test_num} already exists, skipping."
+			(( interactive )) && log "Test ${test_num} already exists; skipping" 1 y
 			continue
 		fi
 
-		log "Making test case ${test_num}. To cancel, enter an empty input file."
-		read_file "${test_in}" "${delimiter}" "Input file" || break
-		read_file "${test_out}" "${delimiter}" "Output file"
+		read_file "${test_in}" "${delimiter}" "Test ${test_num} input" 1 || break
+		read_file "${test_out}" "${delimiter}" "Test ${test_num} output" 1
+		(( tests_made++ ))
 	done
+
+	log "Created ${tests_made} tests" 1
+}
+
+test_input() {
+	local tmp_dir="${1}"
+
+	heading "Making test from standard input"
+
+	if read_file "${tmp_dir}/_judge_stdin.in" $'\n' 'Test input' 1; then
+		log 'Created test input from standard input.' 1 s
+	else
+		log 'Could not create test input from standard input: nothing to read.' 1 y
+	fi
 }
 
 copy_tests() {
 	local test_dir="${1}"
 	local tmp_dir="${2}"
 
+	heading "Loading tests"
+
+	local num_loaded=0
 	local test_file
 	for test_file in "${test_dir}"/*; do
 		local test_in="${test_file%.*}.in"
@@ -162,21 +238,24 @@ copy_tests() {
 			*.in)
 				if [ -f "${test_out}" ]; then
 					cp "${test_in}" "${test_out}" "${tmp_dir}"
+					(( num_loaded++ ))
 				else
-					log "Input file '${test_in}' does not have a corresponding output file '${test_out}'."						
+					log "Ignoring input file '${test_in}' without corresponding output file '${test_out}'." 1 y
 				fi
 				;;
 
 			*.out)
 				if ! [ -f "${test_in}" ]; then
-					log "Output file '${test_out}' does not have a corresponding input file '${test_in}'."
+					log "Ignoring output file '${test_out}' without corresponding input file '${test_in}'." 1 y
 				fi
 				;;
 			*)
-				log "Stray file '${test_file}' in tests directory."
+				log "Ignoring unknown file '${test_file}' in test directory." 1 y
 				;;
 		esac
 	done
+
+	log "Loaded ${num_loaded} test(s)." 1 s
 }
 
 compile() {
@@ -186,17 +265,45 @@ compile() {
 	local compile_out="${dir}/_compile.out"
 	local compile_err="${dir}/_compile.err"
 
-	get_compile_cmd "${src_file}" || return
+	heading 'Compiling'
 
-	log "Compiling:$(printf ' %q' "${compile_cmd[@]}")"
-	"${compile_cmd[@]}" > "${compile_out}" 2> "${compile_err}"
-	local compile_status="$?"
+	if get_compile_cmd "${src_file}"; then
+		log "$(format_cmd compile_cmd)" 1 s
 
-	show_file "${compile_out}" "Compiler standard output"
-	show_file "${compile_err}" "Compiler standard error"
+		"${compile_cmd[@]}" > "${compile_out}" 2> "${compile_err}"
 
-	(( compile_status )) && die "Compilation failed."
-	return "${compile_status}"
+		local compile_status="$?"
+		(( compile_status )) && log "Exit status ${compile_status}." 1 r
+
+		show_file "${compile_out}" 'Standard output' 1
+		show_file "${compile_err}" 'Standard error' 1
+
+		if (( !compile_status )); then
+			return 0
+		fi
+	else
+		log "Cannot compile '$(basename "${src_file}")': language not recognized." 1 r
+	fi
+
+	log "Compilation failed." 1 r
+	return 1
+}
+
+run_tests() {
+	local src_file="${1}"
+
+	heading 'Running tests'
+
+	if ! get_run_cmd "${src_file}"; then
+		log "Cannot run '$(basename "${src_file}")': language not recognized." 1 r
+		return 1
+	else
+		log "$(format_cmd run_cmd)" 1 s
+	fi
+
+	for test_in in "${tmp_dir}"/*.in; do
+		run "${test_in}"
+	done
 }
 
 run() {
@@ -208,49 +315,64 @@ run() {
 	local test_my="${test_base}.my"
 	local test_err="${test_base}.err"
 
-	log "Running test ${test_name}:$(printf ' %q' "${run_cmd[@]}")"
+	>&2 echo -n "${indent}Test ${test_name}: "
+
 	"${run_cmd[@]}" < "${test_in}" > "${test_my}" 2> "${test_err}"
-
 	local run_status="$?"
-	(( run_status )) && log "Exited with status ${run_status}."
-
-	show_file "${test_err}" "Standard error"
 
 	local test_out="${test_base}.out"
 	if [ -f "${test_out}" ]; then
 		local diff_width=$(( $(wc -L < "${test_my}") + $(wc -L < "${test_out}") + 16 ))
 		local test_diff="${test_base}.diff"
-		diff --color=always --side-by-side --suppress-common-lines --width=${diff_width} \
+		diff --color=always --side-by-side --width=${diff_width} \
 			"${test_my}" "${test_out}" > "${test_diff}"
 		local diff_status="$?"
-
-		if (( diff_status )); then
-			log "Test failed."
-			show_file "${test_in}" "Standard input"
-			show_file "${test_diff}" "Diff .my | .out"
-		else
-			log "Test passed."
-		fi
 	else
-		show_file "${test_my}" "Standard output"
+		local diff_status=2
 	fi
+
+	case "${diff_status}" in
+		0)
+			log "${tp_g}passed${tp_n}." 0
+			;;
+		1)
+			log "${tp_r}failed${tp_n}." 0
+			;;
+		2)
+			log 'unknown.' 0
+			;;
+	esac
+
+	(( run_status )) && log "Exit status ${run_status}." 2 r
+
+	case "${diff_status}" in
+		1)
+			show_file "${test_in}" "Standard input" 2
+			show_file "${test_diff}" "diff '$(basename "${test_my}")' '$(basename "${test_out}")'" 2
+			;;
+		2)
+			show_file "${test_my}" "Standard output" 2 1
+			;;
+	esac
+
+	show_file "${test_err}" "Standard error" 2
 }
 
 usage() {
 	cat << EOF
 Usage: judge [OPTION]... SOURCE_CODE
-Compile and run source code against test cases.
+Compile and run source code against test inputs.
 
     -h, --help          Show this help message.
-    -i, --interactive   Read a one-off test case interactively.
-    -t, --make-tests    Make test case files interactively.
+    -i, --test-input    Read a test input from standard input.
+    -t, --make-tests    Use standard input to generate test input/output files.
         --version       Show version information.
 EOF
 }
 
 version() {
 	cat << EOF
-local-cp-judge 0.1.2
+local-cp-judge 0.2.1
 
 Copyright (C) 2021 Justin Yao Du.
 Licensed under the MIT License.
@@ -260,8 +382,15 @@ EOF
 }
 
 main() {
-	local interactive=0
-	local make_tests=0
+	enable_color
+
+	# Determine whether standard input is coming from a terminal.
+	[ ! -t 0 ]
+	interactive="$?"
+
+	test_input=0
+	make_tests=0
+
 	local orig_src_file=""
 
 	while (( $# )); do
@@ -272,8 +401,8 @@ main() {
 				usage
 				exit
 				;;
-			-i|--interactive)
-				interactive=1
+			-i|--test-input)
+				test_input=1
 				continue
 				;;
 			-t|--make-tests)
@@ -285,11 +414,11 @@ main() {
 				exit
 				;;
 			-*)
-				die_usage "Unrecognized option '${1}'."
+				die_usage "Unrecognized option '${arg}'."
 				;;
 			*)
 				orig_src_file="${arg}"
-				(( $# )) && die_usage "Trailing argument(s): '$*'."
+				(( $# )) && die_usage "Trailing argument(s): '$@'."
 				break
 				;;
 		esac
@@ -298,42 +427,41 @@ main() {
 	[ "${orig_src_file}" ] || die_usage "No source code file specified."
 	[ -f "${orig_src_file}" ] || die "File does not exist: '${orig_src_file}'."
 
-	if ! [ -t 0 ] && (( !interactive )) && (( !make_tests )); then
-		log "Detected input redirection. Switching to interactive mode."
-		interactive=1
-	fi
-
 	local orig_dir="$(dirname "${orig_src_file}")"
 	local src_file="$(basename "${orig_src_file}")"
 
 	local judgerc="${orig_dir}/.judgerc"
 	[ -f "${judgerc}" ] && source "${judgerc}"
 
+	local test_dir="${orig_dir}/$(get_test_dir "${src_file}")"
+	test_dir="${test_dir#./}"
+
+	if (( !interactive && !test_input && !make_tests )); then
+		local message='Standard input is not a terminal, but neither --test-input nor'
+		message+=' --make-tests were specified. If anything is piped to standard input,'
+		message+=' it will be interpreted as a test input.'
+		test_input=2
+		log "${message}" 1 y
+	fi
+
+	(( make_tests )) && make_tests "${test_dir}"
+
 	local tmp_dir="$(mktemp --tmpdir -d "judge-$(date +'%Y-%m-%d-%H-%M-%S')-XXXXXXXXXX")"
 
-	local test_dir="${orig_dir}/_$(tr '[:upper:]' '[:lower:]' <<< "${orig_src_file%.*}")"
-	(( make_tests )) && make_tests "${test_dir}"
 	if [ -d "${test_dir}" ]; then
 		copy_tests "${test_dir}" "${tmp_dir}"
-	elif (( !interactive )); then
-		log "Tests directory '${test_dir}' does not exist. Switching to interactive mode."
-		interactive=1
+	elif (( !test_input )); then
+		log "Test directory does not exist: '${test_dir}'. Interpreting standard input as a test input." 0 y
+		test_input=2
 	fi
+
+	(( test_input )) && test_input "${tmp_dir}"
 
 	cp "${orig_src_file}" "${tmp_dir}"
 	local tmp_src_file="${tmp_dir}/${src_file}"
 	compile "${tmp_src_file}" || return
 
-	get_run_cmd "${tmp_src_file}" || return
-
-	if (( interactive )); then
-		log "Enter test case input, followed by EOF (Ctrl+D):"
-		cat > "${tmp_dir}/_interactive.in"
-	fi
-
-	for test_in in "${tmp_dir}"/*.in; do
-		run "${test_in}"
-	done
+	run_tests "${tmp_src_file}"
 }
 
 main "$@"
