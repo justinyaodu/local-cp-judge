@@ -26,6 +26,7 @@ get_test_dir() {
 
 ######## Utility Functions ########
 
+# Output a message to standard error, with optional indentation and coloring.
 log() {
 	local message="${1}"
 	local num_indents="${2:0}"
@@ -46,6 +47,10 @@ log() {
 	done
 
 	>&2 echo "${prefix}${message}${suffix}"
+}
+
+ilog() {
+	(( interactive )) && log "$@"
 }
 
 die() {
@@ -74,22 +79,22 @@ show_file() {
 	local num_indents="${3}"
 	local to_stdout="${4:0}"
 
-	if [ -s "${file}" ]; then
-		log "${2} (${tp_s}${file}${tp_n}):" "${num_indents}"
+	[ -s "${file}" ] || return
 
-		if (( to_stdout )); then
-			cat "${file}"
-		else
-			local indents=""
-			local i
-			for (( i = num_indents + 1; i > 0; i-- )); do
-				indents+="${indent}"
-			done
+	log "${2} (${tp_s}${file}${tp_n}):" "${num_indents}"
 
-			# HACK: The colored diff output sometimes contains ANSI escape sequences
-			# after the final \n, so s/^/${indents}/ results in incorrect indentation.
-			>&2 sed -Ez "s/[^\n]*\n/${indents}&/g" < "${file}"
-		fi
+	if (( to_stdout )); then
+		cat "${file}"
+	else
+		local indents=""
+		local i
+		for (( i = num_indents + 1; i > 0; i-- )); do
+			indents+="${indent}"
+		done
+
+		# HACK: The colored diff output sometimes contains ANSI escape sequences
+		# after the final \n, so s/^/${indents}/ results in incorrect indentation.
+		>&2 sed -Ez "s/[^\n]*\n/${indents}&/g" < "${file}"
 	fi
 }
 
@@ -109,6 +114,21 @@ read_file() {
 	local num_indents="${4}"
 
 	log "${description} (${tp_s}${file}${tp_n}):" "${num_indents}"
+	if (( interactive )); then
+		local message="Enter each line of data, terminated by "
+		case "${delimiter}" in
+			'')
+				message+="a blank line."
+				;;
+			$'\n')
+				message+="EOF (Control+D)."
+				;;
+			*)
+				message+="a line containing only '${delimiter}' (without the quotes)."
+				;;
+		esac
+		log "${message}" "${num_indents}" s
+	fi
 
 	local num_lines=0
 	local line
@@ -183,11 +203,12 @@ make_tests() {
 
 	(( make_tests )) || return 0
 
-	heading "Making test files"
+	heading "Creating test files"
 
 	mkdir -p "${test_dir}"
 
-	(( interactive )) && log "Delimiter line:" 1
+	ilog 'Enter the delimiter you will use to separate each file you type in. Press Enter to use a blank line.' 1 s
+	log "Delimiter:" 1
 	local delimiter
 	IFS= read -r delimiter
 
@@ -199,27 +220,33 @@ make_tests() {
 		local test_out="${test_base}.out"
 
 		if [ -f "${test_in}" ] || [ -f "${test_out}" ]; then
-			(( interactive )) && log "Test ${test_num} already exists; skipping" 1 y
+			log "Test ${test_num} already exists." 1 s
 			continue
 		fi
 
-		read_file "${test_in}" "${delimiter}" "Test ${test_num} input" 1 || break
-		read_file "${test_out}" "${delimiter}" "Test ${test_num} output" 1
+		if ! read_file "${test_in}" "${delimiter}" "Test ${test_num} input" 1; then
+			log "No lines entered. Test creation canceled." 1 s
+			break
+		fi
+		if ! read_file "${test_out}" "${delimiter}" "Test ${test_num} output" 1; then
+			log "No lines entered. The output file for this test was not created." 1 y
+			break
+		fi
 		(( tests_made++ ))
 	done
 
-	log "Created ${tests_made} tests" 1
+	log "Created ${tests_made} test(s)." 1
 }
 
 test_input() {
 	local tmp_dir="${1}"
 
-	heading "Making test from standard input"
+	heading "Creating a test from standard input"
 
 	if read_file "${tmp_dir}/_judge_stdin.in" $'\n' 'Test input' 1; then
 		log 'Created test input from standard input.' 1 s
 	else
-		log 'Could not create test input from standard input: nothing to read.' 1 y
+		log 'No lines entered. Test creation canceled.' 1 y
 	fi
 }
 
@@ -331,17 +358,19 @@ run() {
 		local diff_status=2
 	fi
 
+	local test_status
 	case "${diff_status}" in
 		0)
-			log "${tp_g}passed${tp_n}." 0
+			test_status="${tp_g}passed"
 			;;
 		1)
-			log "${tp_r}failed${tp_n}." 0
+			test_status="${tp_r}failed"
 			;;
 		2)
-			log 'unknown.' 0
+			test_status="${tp_s}unknown"
 			;;
 	esac
+	log "${test_status}${tp_n}." 0
 
 	(( run_status )) && log "Exit status ${run_status}." 2 r
 
