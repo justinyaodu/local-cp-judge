@@ -258,6 +258,34 @@ test_input() {
 	fi
 }
 
+copy_test() {
+	local test_file="${1}"
+	local tmp_dir="${2}"
+
+	local test_in="${test_file%.*}.in"
+	local test_out="${test_file%.*}.out"
+
+	case "${test_file}" in
+		*.in)
+			if [ -f "${test_out}" ]; then
+				cp "${test_in}" "${test_out}" "${tmp_dir}"
+				return 0
+			else
+				log "Ignoring input file '${test_in}' without corresponding output file '${test_out}'." 1 y
+			fi
+			;;
+
+		*.out)
+			[ -f "${test_in}" ] || log "Ignoring output file '${test_out}' without corresponding input file '${test_in}'." 1 y
+			;;
+		*)
+			log "Ignoring unknown file '${test_file}' in test directory." 1 y
+			;;
+	esac
+
+	return 1
+}
+
 copy_tests() {
 	local test_dir="${1}"
 	local tmp_dir="${2}"
@@ -266,29 +294,9 @@ copy_tests() {
 
 	local num_loaded=0
 	local test_file
-	for test_file in "${test_dir}"/*; do
-		local test_in="${test_file%.*}.in"
-		local test_out="${test_file%.*}.out"
-		case "${test_file}" in
-			*.in)
-				if [ -f "${test_out}" ]; then
-					cp "${test_in}" "${test_out}" "${tmp_dir}"
-					(( num_loaded++ ))
-				else
-					log "Ignoring input file '${test_in}' without corresponding output file '${test_out}'." 1 y
-				fi
-				;;
-
-			*.out)
-				if ! [ -f "${test_in}" ]; then
-					log "Ignoring output file '${test_out}' without corresponding input file '${test_in}'." 1 y
-				fi
-				;;
-			*)
-				log "Ignoring unknown file '${test_file}' in test directory." 1 y
-				;;
-		esac
-	done
+	while read -r test_file; do
+		copy_test "${test_file}" "${tmp_dir}" && (( num_loaded++ ))
+	done < <(find "${test_dir}" -maxdepth 1 -type f)
 
 	log "Loaded ${num_loaded} test(s)." 1 s
 }
