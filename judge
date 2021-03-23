@@ -156,6 +156,15 @@ enable_color() {
 
 ######## Judge Functions ########
 
+# List test files in the order they should be run. Test names starting with numbers are sorted
+# numerically, followed by the other tests sorted lexicographically.
+list_test_files() {
+	local dir="${1}"
+
+	find "${dir}" -maxdepth 1 -type f -name '[0-9]*.in' -printf '%f\n' | sort -g
+	find "${dir}" -maxdepth 1 -type f -name '[^0-9]*.in' -printf '%f\n'
+}
+
 get_compile_cmd() {
 	local src_file="${1}"
 
@@ -328,9 +337,10 @@ run_tests() {
 		log "$(format_cmd run_cmd)" 1 s
 	fi
 
-	for test_in in "${tmp_dir}"/*.in; do
-		run "${test_in}"
-	done
+	local test_in
+	while read -r test_in; do
+		run "${tmp_dir}/${test_in}"
+	done < <(list_test_files "${tmp_dir}")
 }
 
 run() {
@@ -401,7 +411,7 @@ EOF
 
 version() {
 	cat << EOF
-local-cp-judge 0.2.1
+local-cp-judge 0.2.2
 
 Copyright (C) 2021 Justin Yao Du.
 Licensed under the MIT License.
