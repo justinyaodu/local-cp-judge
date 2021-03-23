@@ -337,6 +337,8 @@ run_tests() {
 		log "$(format_cmd run_cmd)" 1 s
 	fi
 
+	(( use_builtin_time )) && log "To show memory usage, install GNU time." 1 s
+
 	local test_in
 	while read -r test_in; do
 		run "${tmp_dir}/${test_in}"
@@ -355,15 +357,28 @@ run() {
 
 	>&2 echo -n "${indent}Test ${test_name}: "
 
-	command time -o "${test_time}" -q -f '%e\n%M' "${run_cmd[@]}" < "${test_in}" > "${test_my}" 2> "${test_err}"
+	if (( use_builtin_time )); then
+		local TIMEFORMAT='%R'
+		{
+			time "${run_cmd[@]}" < "${test_in}" > "${test_my}" 2> "${test_err}"
+		} 2> "${test_time}"
+	else
+		command time -o "${test_time}" -q -f '%e\n%M' \
+			"${run_cmd[@]}" < "${test_in}" > "${test_my}" 2> "${test_err}"
+	fi
 	local run_status="$?"
 
-	{
-		local run_sec run_kb
-		read -r run_sec
-		read -r run_kb
-	} < "${test_time}"
-	local run_stats="${run_sec} s, $(bc <<< "scale=1; ${run_kb} / 1024") MB"
+	local run_stats
+	if (( use_builtin_time )); then
+		run_stats="$(<"${test_time}") s"
+	else
+		{
+			local run_sec run_kb
+			read -r run_sec
+			read -r run_kb
+		} < "${test_time}"
+		run_stats="${run_sec} s, $(bc <<< "scale=1; ${run_kb} / 1024") MB"
+	fi
 
 	local test_out="${test_base}.out"
 	if [ -f "${test_out}" ]; then
@@ -434,6 +449,10 @@ main() {
 	# Determine whether standard input is coming from a terminal.
 	[ ! -t 0 ]
 	interactive="$?"
+
+	# Determine whether the standalone time utility is available. If it isn't, use the Bash builtin.
+	command -v time &> /dev/null
+	use_builtin_time="$?"
 
 	test_input=0
 	make_tests=0
