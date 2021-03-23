@@ -156,13 +156,21 @@ enable_color() {
 
 ######## Judge Functions ########
 
-# List test files in the order they should be run. Test names starting with numbers are sorted
-# numerically, followed by the other tests sorted lexicographically.
+# List basenames of files in a directory.
+find_files() {
+	local dir="${1}"
+	shift
+
+	find "${dir}" -maxdepth 1 -type f "$@" -printf '%f\n'
+}
+
+# List test files in the order they should be run.
 list_test_files() {
 	local dir="${1}"
 
-	find "${dir}" -maxdepth 1 -type f -name '[0-9]*.in' -printf '%f\n' | sort -g
-	find "${dir}" -maxdepth 1 -type f -name '[^0-9]*.in' -printf '%f\n'
+	find_files "${dir}" -name '[0-9]*.in' | sort -g
+	find_files "${dir}" -name '[^0-9_]*.in'
+	find_files "${dir}" -name '_*.in'
 }
 
 get_compile_cmd() {
