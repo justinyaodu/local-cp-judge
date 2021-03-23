@@ -178,10 +178,10 @@ get_compile_cmd() {
 
 	case "${src_file}" in
 		*.c)
-			compile_cmd=(${CC} ${CFLAGS} "${src_file}" -o "$(base_path "${src_file}")")
+			compile_cmd=(${CC} ${CFLAGS} "${src_file}" -o "${src_file%.*}")
 			;;
 		*.cc|*.cpp|*.cxx)
-			compile_cmd=(${CXX} ${CXXFLAGS} "${src_file}" -o "$(base_path "${src_file}")")
+			compile_cmd=(${CXX} ${CXXFLAGS} "${src_file}" -o "${src_file%.*}")
 			;;
 		*.java)
 			compile_cmd=(${JAVAC} ${JFLAGS} "${src_file}")
@@ -200,11 +200,11 @@ get_run_cmd() {
 
 	case "${src_file}" in
 		*.c|*.cc|*.cpp|*.cxx)
-			run_cmd=("$(base_path "${src_file}")")
+			run_cmd=("./${src_file%.*}")
 			;;
 		*.java)
-			local class_name="$(basename "${src_file}" '.java')"
-			run_cmd=(${JAVA} ${JRUN} -classpath "$(dirname "${src_file}")" "${class_name}")
+			local class_name="${src_file%.java}"
+			run_cmd=(${JAVA} ${JRUN} "${class_name}")
 			;;
 		*.py)
 			run_cmd=(${PY} ${PYRUN} "${src_file}")
@@ -303,34 +303,36 @@ copy_tests() {
 }
 
 compile() {
-	local src_file="${1}"
+	local dir="$(dirname "${1}")"
+	local src_file="$(basename "${1}")"
 
-	local dir="$(dirname "${src_file}")"
-	local compile_out="${dir}/_compile.out"
-	local compile_err="${dir}/_compile.err"
+	pushd "${dir}" &> /dev/null
+
+	local compile_out="_compile.out"
+	local compile_err="_compile.err"
 
 	heading 'Compiling'
 
+	local compile_status
 	if get_compile_cmd "${src_file}"; then
 		log "$(format_cmd compile_cmd)" 1 s
 
 		"${compile_cmd[@]}" > "${compile_out}" 2> "${compile_err}"
+		compile_status="$?"
 
-		local compile_status="$?"
 		(( compile_status )) && log "Exit status ${compile_status}." 1 r
 
 		show_file "${compile_out}" 'Standard output' 1
 		show_file "${compile_err}" 'Standard error' 1
-
-		if (( !compile_status )); then
-			return 0
-		fi
 	else
-		log "Cannot compile '$(basename "${src_file}")': language not recognized." 1 r
+		log "Cannot compile '${src_file}': language not recognized." 1 r
+		compile_status=1
 	fi
 
-	log "Compilation failed." 1 r
-	return 1
+	popd &> /dev/null
+
+	(( compile_status )) && log "Compilation failed." 1 r
+	return "${compile_status}"
 }
 
 run_tests() {
@@ -338,7 +340,7 @@ run_tests() {
 
 	heading 'Running tests'
 
-	if ! get_run_cmd "${src_file}"; then
+	if ! get_run_cmd "$(basename "${src_file}")"; then
 		log "Cannot run '$(basename "${src_file}")': language not recognized." 1 r
 		return 1
 	else
@@ -354,14 +356,16 @@ run_tests() {
 }
 
 run() {
-	local test_in="${1}"
+	local dir="$(dirname "${1}")"
+	local test_in="$(basename "${1}")"
 
-	local test_base="$(base_path "${test_in}")"
-	local test_name="$(basename "${test_base}")"
+	pushd "${dir}" &> /dev/null
 
-	local test_my="${test_base}.my"
-	local test_err="${test_base}.err"
-	local test_time="${test_base}.time"
+	local test_name="${test_in%.in}"
+
+	local test_my="${test_name}.my"
+	local test_err="${test_name}.err"
+	local test_time="${test_name}.time"
 
 	>&2 echo -n "${indent}Test ${test_name}: "
 
@@ -388,10 +392,10 @@ run() {
 		run_stats="${run_sec} s, $(bc <<< "scale=1; ${run_kb} / 1024") MB"
 	fi
 
-	local test_out="${test_base}.out"
+	local test_out="${test_name}.out"
 	if [ -f "${test_out}" ]; then
 		local diff_width=$(( $(wc -L < "${test_my}") + $(wc -L < "${test_out}") + 16 ))
-		local test_diff="${test_base}.diff"
+		local test_diff="${test_name}.diff"
 		diff --color=always --side-by-side --width=${diff_width} \
 			"${test_my}" "${test_out}" > "${test_diff}"
 		local diff_status="$?"
@@ -426,6 +430,10 @@ run() {
 	esac
 
 	show_file "${test_err}" "Standard error" 2
+
+	popd &> /dev/null
+
+	return "${diff_status}"
 }
 
 usage() {
