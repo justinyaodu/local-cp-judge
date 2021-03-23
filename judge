@@ -17,7 +17,7 @@ PY='python'
 PYFLAGS='-m py_compile'
 PYRUN=''
 
-indent=$'\t'
+indent='  '
 
 get_test_dir() {
 	local src_file="${1}"
@@ -94,7 +94,7 @@ show_file() {
 
 		# HACK: The colored diff output sometimes contains ANSI escape sequences
 		# after the final \n, so s/^/${indents}/ results in incorrect indentation.
-		>&2 sed -Ez "s/[^\n]*\n/${indents}&/g" < "${file}"
+		>&2 sed -Ez -e 's/\t/        /g' -e "s/[^\n]*\n/${indents}&/g" < "${file}"
 	fi
 }
 
