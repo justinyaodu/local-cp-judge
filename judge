@@ -351,11 +351,19 @@ run() {
 
 	local test_my="${test_base}.my"
 	local test_err="${test_base}.err"
+	local test_time="${test_base}.time"
 
 	>&2 echo -n "${indent}Test ${test_name}: "
 
-	"${run_cmd[@]}" < "${test_in}" > "${test_my}" 2> "${test_err}"
+	command time -o "${test_time}" -q -f '%e\n%M' "${run_cmd[@]}" < "${test_in}" > "${test_my}" 2> "${test_err}"
 	local run_status="$?"
+
+	{
+		local run_sec run_kb
+		read -r run_sec
+		read -r run_kb
+	} < "${test_time}"
+	local run_stats="${run_sec} s, $(bc <<< "scale=1; ${run_kb} / 1024") MB"
 
 	local test_out="${test_base}.out"
 	if [ -f "${test_out}" ]; then
@@ -380,7 +388,7 @@ run() {
 			test_status="${tp_s}unknown"
 			;;
 	esac
-	log "${test_status}${tp_n}." 0
+	log "${test_status}${tp_n} (${run_stats})." 0
 
 	(( run_status )) && log "Exit status ${run_status}." 2 r
 
@@ -411,7 +419,7 @@ EOF
 
 version() {
 	cat << EOF
-local-cp-judge 0.2.2
+local-cp-judge 0.2.3
 
 Copyright (C) 2021 Justin Yao Du.
 Licensed under the MIT License.
