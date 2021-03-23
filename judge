@@ -383,26 +383,27 @@ run() {
 		local diff_status=2
 	fi
 
-	local test_status
+	local test_verdict
 	case "${diff_status}" in
 		0)
-			test_status="${tp_g}passed"
+			test_verdict="${tp_g}passed"
 			;;
 		1)
-			test_status="${tp_r}failed"
+			test_verdict="${tp_r}failed"
 			;;
 		2)
-			test_status="${tp_s}unknown"
+			test_verdict="${tp_s}unknown"
 			;;
 	esac
-	log "${test_status}${tp_n} (${run_stats})." 0
+
+	log "${test_verdict}${tp_n} (${run_stats})." 0
 
 	(( run_status )) && log "Exit status ${run_status}." 2 r
 
 	case "${diff_status}" in
 		1)
 			show_file "${test_in}" "Standard input" 2
-			show_file "${test_diff}" "diff '$(basename "${test_my}")' '$(basename "${test_out}")'" 2
+			show_file "${test_diff}" "diff '${test_my}' '${test_out}'" 2
 			;;
 		2)
 			show_file "${test_my}" "Standard output" 2 1
