@@ -64,14 +64,6 @@ die_usage() {
 	exit 1
 }
 
-# Remove the file extension and make the parent directory explicit.
-base_path() {
-	local file="${1}"
-
-	local base="$(basename "${file}")"
-	echo "$(dirname "${1}")/${base%.*}"
-}
-
 # Display a file if it is not empty.
 show_file() {
 	local file="${1}"
@@ -203,8 +195,7 @@ get_run_cmd() {
 			run_cmd=("./${src_file%.*}")
 			;;
 		*.java)
-			local class_name="${src_file%.java}"
-			run_cmd=(${JAVA} ${JRUN} "${class_name}")
+			run_cmd=(${JAVA} ${JRUN} "${src_file%.java}")
 			;;
 		*.py)
 			run_cmd=(${PY} ${PYRUN} "${src_file}")
@@ -303,10 +294,7 @@ copy_tests() {
 }
 
 compile() {
-	local dir="$(dirname "${1}")"
-	local src_file="$(basename "${1}")"
-
-	pushd "${dir}" &> /dev/null
+	local src_file="${1}"
 
 	local compile_out="_compile.out"
 	local compile_err="_compile.err"
@@ -325,11 +313,9 @@ compile() {
 		show_file "${compile_out}" 'Standard output' 1
 		show_file "${compile_err}" 'Standard error' 1
 	else
-		log "Cannot compile '${src_file}': language not recognized." 1 r
+		log "Cannot compile '${src_file}': language not supported." 1 r
 		compile_status=1
 	fi
-
-	popd &> /dev/null
 
 	(( compile_status )) && log "Compilation failed." 1 r
 	return "${compile_status}"
@@ -340,8 +326,8 @@ run_tests() {
 
 	heading 'Running tests'
 
-	if ! get_run_cmd "$(basename "${src_file}")"; then
-		log "Cannot run '$(basename "${src_file}")': language not recognized." 1 r
+	if ! get_run_cmd "${src_file}"; then
+		log "Cannot run '${src_file}': language not supported." 1 r
 		return 1
 	else
 		log "$(format_cmd run_cmd)" 1 s
@@ -351,15 +337,12 @@ run_tests() {
 
 	local test_in
 	while read -r test_in; do
-		run "${tmp_dir}/${test_in}"
-	done < <(list_test_files "${tmp_dir}")
+		run "${test_in}"
+	done < <(list_test_files .)
 }
 
 run() {
-	local dir="$(dirname "${1}")"
 	local test_in="$(basename "${1}")"
-
-	pushd "${dir}" &> /dev/null
 
 	local test_name="${test_in%.in}"
 
@@ -430,8 +413,6 @@ run() {
 	esac
 
 	show_file "${test_err}" "Standard error" 2
-
-	popd &> /dev/null
 
 	return "${diff_status}"
 }
@@ -540,10 +521,11 @@ main() {
 	(( test_input )) && test_input "${tmp_dir}"
 
 	cp "${orig_src_file}" "${tmp_dir}"
-	local tmp_src_file="${tmp_dir}/${src_file}"
-	compile "${tmp_src_file}" || return
 
-	run_tests "${tmp_src_file}"
+	pushd "${tmp_dir}" &> /dev/null
+
+	compile "${src_file}" || return
+	run_tests "${src_file}"
 }
 
 main "$@"
