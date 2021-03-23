@@ -358,7 +358,7 @@ run() {
 			time "${run_cmd[@]}" < "${test_in}" > "${test_my}" 2> "${test_err}"
 		} 2> "${test_time}"
 	else
-		command time -o "${test_time}" -q -f '%e\n%M' \
+		command time -o "${test_time}" -q -f '%e %M' \
 			"${run_cmd[@]}" < "${test_in}" > "${test_my}" 2> "${test_err}"
 	fi
 	local run_status="$?"
@@ -367,11 +367,8 @@ run() {
 	if (( use_builtin_time )); then
 		run_stats="$(<"${test_time}") s"
 	else
-		{
-			local run_sec run_kb
-			read -r run_sec
-			read -r run_kb
-		} < "${test_time}"
+		local run_sec run_kb
+		read -r run_sec run_kb < "${test_time}"
 		run_stats="${run_sec} s, $(bc <<< "scale=1; ${run_kb} / 1024") MB"
 	fi
 
