@@ -49,10 +49,6 @@ log() {
 	>&2 echo "${prefix}${message}${suffix}"
 }
 
-ilog() {
-	(( interactive )) && log "$@"
-}
-
 die() {
 	log "${1}" 0 r
 	exit 1
@@ -70,17 +66,20 @@ show_file() {
 	local description="${2}"
 	local num_indents="${3}"
 	local to_stdout="${4:0}"
+	local caption="${5}"
 
 	[ -s "${file}" ] || return
 
 	log "${2} (${tp_s}${file}${tp_n}):" "${num_indents}"
+
+	[ "${caption}" ] && log "${caption}" "$(( num_indents + 1 ))" s
 
 	if (( to_stdout )); then
 		cat "${file}"
 	else
 		local indents=""
 		local i
-		for (( i = num_indents + 1; i > 0; i-- )); do
+		for (( i = 0; i < num_indents + 1; i++ )); do
 			indents+="${indent}"
 		done
 
@@ -95,6 +94,24 @@ format_cmd() {
 	declare -n array="${1}"
 	(( ${#array[@]} > 0 )) && printf '%q' "${array[0]}"
 	(( ${#array[@]} > 1 )) && printf ' %q' "${array[@]:1}"
+	echo
+}
+
+describe_delimiter() {
+	local delimiter="${1}"
+
+	case "${delimiter}" in
+		'')
+			echo 'a blank line.'
+			;;
+		$'\n')
+			echo 'EOF (Control+D).'
+			;;
+		*)
+			echo 'the following line:'
+			echo "${delimiter}"
+			;;
+	esac
 }
 
 # Read a file from standard input, terminated by a delimiter. If the delimiter is a newline
@@ -106,21 +123,10 @@ read_file() {
 	local num_indents="${4}"
 
 	log "${description} (${tp_s}${file}${tp_n}):" "${num_indents}"
-	if (( interactive )); then
-		local message="Enter each line of data, terminated by "
-		case "${delimiter}" in
-			'')
-				message+="a blank line."
-				;;
-			$'\n')
-				message+="EOF (Control+D)."
-				;;
-			*)
-				message+="a line containing only '${delimiter}' (without the quotes)."
-				;;
-		esac
-		log "${message}" "${num_indents}" s
-	fi
+
+	local msg='Enter each line of data. When you are done, enter '
+	msg+="$(describe_delimiter "${delimiter}")"
+	log "${msg}" "${num_indents}" s
 
 	local num_lines=0
 	local line
@@ -211,14 +217,22 @@ make_tests() {
 
 	(( make_tests )) || return 0
 
-	heading "Creating test files"
+	heading "Populating test directory"
 
 	mkdir -p "${test_dir}"
 
-	ilog 'Enter the delimiter you will use to separate each file you type in. Press Enter to use a blank line.' 1 s
-	log "Delimiter:" 1
+	log \
+'Enter the delimiter you will use to separate the test inputs and expected
+outputs from each other. When this delimiter appears on a line of its own, it
+indicates the end of the current file, so you should choose a delimiter that
+does not appear in the test inputs or the expected outputs. To stop making
+tests, enter the delimiter as the first line of a file. To use a blank line as
+a delimiter, simply press Enter.' 0 s
+	log "Delimiter:" 0
 	local delimiter
 	IFS= read -r delimiter
+
+	log "Delimiter is $(describe_delimiter "${delimiter}")" 0 s
 
 	local tests_made=0
 	local test_num
@@ -233,11 +247,11 @@ make_tests() {
 		fi
 
 		if ! read_file "${test_in}" "${delimiter}" "Test ${test_num} input" 1; then
-			log "No lines entered. Test creation canceled." 1 s
+			log "No test input entered. Test creation canceled." 1 s
 			break
 		fi
-		if ! read_file "${test_out}" "${delimiter}" "Test ${test_num} output" 1; then
-			log "No lines entered. The output file for this test was not created." 1 y
+		if ! read_file "${test_out}" "${delimiter}" "Test ${test_num} expected output" 1; then
+			log "No expected output entered. This test is incomplete." 1 y
 			break
 		fi
 		(( tests_made++ ))
@@ -249,7 +263,7 @@ make_tests() {
 test_input() {
 	local tmp_dir="${1}"
 
-	heading "Creating a test from standard input"
+	heading "Reading test input"
 
 	if read_file "${tmp_dir}/_judge_stdin.in" $'\n' 'Test input' 1; then
 		log 'Created test input from standard input.' 1 s
@@ -271,12 +285,12 @@ copy_test() {
 				cp "${test_in}" "${test_out}" "${tmp_dir}"
 				return 0
 			else
-				log "Ignoring input file '${test_in}' without corresponding output file '${test_out}'." 1 y
+				log "Ignoring test input '${test_in}': expected output '${test_out}' is missing." 1 y
 			fi
 			;;
 
 		*.out)
-			[ -f "${test_in}" ] || log "Ignoring output file '${test_out}' without corresponding input file '${test_in}'." 1 y
+			[ -f "${test_in}" ] || log "Ignoring expected output '${test_out}': test input '${test_in}' is missing." 1 y
 			;;
 		*)
 			log "Ignoring unknown file '${test_file}' in test directory." 1 y
@@ -377,12 +391,12 @@ run() {
 	else
 		local run_sec run_kb
 		read -r run_sec run_kb < "${test_time}"
-		run_stats="${run_sec} s, $(bc <<< "scale=1; ${run_kb} / 1024") MB"
+		run_stats="${run_sec} s, $(bc <<< "scale=1; ${run_kb} / 1024") MiB"
 	fi
 
 	local test_out="${test_name}.out"
 	if [ -f "${test_out}" ]; then
-		local diff_width=$(( $(wc -L < "${test_my}") + $(wc -L < "${test_out}") + 16 ))
+		local diff_width=$(( $(wc -L < "${test_my}") + $(wc -L < "${test_out}") + 8 ))
 		local test_diff="${test_name}.diff"
 		diff --color=always --side-by-side --width=${diff_width} \
 			"${test_my}" "${test_out}" > "${test_diff}"
@@ -410,11 +424,12 @@ run() {
 
 	case "${diff_status}" in
 		1)
-			show_file "${test_in}" "Standard input" 2
-			show_file "${test_diff}" "diff '${test_my}' '${test_out}'" 2
+			show_file "${test_in}" "Test input" 2
+			show_file "${test_diff}" 'Program output and expected output' 2 0 \
+				"diff $(printf '%q' "${test_my}") $(printf '%q' "${test_out}")"
 			;;
 		2)
-			show_file "${test_my}" "Standard output" 2 1
+			show_file "${test_my}" "Program output" 2 1
 			;;
 	esac
 
