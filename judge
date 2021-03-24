@@ -255,7 +255,7 @@ a delimiter, simply press Enter.' 0 s
 		(( tests_made++ ))
 	done
 
-	log "Created ${tests_made} test(s)." 1
+	log "Made ${tests_made} test(s)." 1
 }
 
 test_stdin() {
@@ -264,9 +264,9 @@ test_stdin() {
 	heading "Reading test input"
 
 	if read_file "${tmp_dir}/_judge_stdin.in" $'\n' 'Test input' 1; then
-		log 'Created test input from standard input.' 1 s
+		log 'Made test input from stdin.' 1 s
 	else
-		log 'No lines entered. Test creation canceled.' 1 y
+		log 'No test input entered. Test creation canceled.' 1 y
 	fi
 }
 
@@ -540,11 +540,8 @@ main() {
 	test_dir="${test_dir#./}"
 
 	if (( !interactive && !test_stdin && !make_tests )); then
-		local message='Standard input is not a terminal, but neither --test-stdin nor'
-		message+=' --make-tests were specified. If anything is piped to standard input,'
-		message+=' it will be interpreted as a test input.'
+		log 'None of the options -itT were given, and stdin is not a terminal. Option -i implied.' 0 y
 		test_stdin=2
-		log "${message}" 1 y
 	fi
 
 	case "${make_tests}" in
@@ -565,7 +562,7 @@ main() {
 	if [ -d "${test_dir}" ]; then
 		copy_tests "${test_dir}" "${tmp_dir}"
 	elif (( !test_stdin )); then
-		log "Test directory '${test_dir}' does not exist. Option -i implied."
+		log "Test directory '${test_dir}' does not exist. Option -i implied." 0 s
 		test_stdin=2
 	fi
 
