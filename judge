@@ -17,7 +17,7 @@ PY='python'
 PYFLAGS='-m py_compile'
 PYRUN=''
 
-indent='  '
+indent='    '
 
 get_test_dir() {
 	local src_file="${1}"
@@ -167,8 +167,8 @@ list_test_files() {
 	local dir="${1}"
 
 	find_files "${dir}" -name '[0-9]*.in' | sort -g
-	find_files "${dir}" -name '[^0-9_]*.in'
-	find_files "${dir}" -name '_*.in'
+	find_files "${dir}" -name '[^0-9_]*.in' | sort
+	find_files "${dir}" -name '_*.in' | sort
 }
 
 get_compile_cmd() {
@@ -215,7 +215,7 @@ get_run_cmd() {
 make_tests() {
 	local test_dir="${1}"
 
-	heading "Populating test directory"
+	heading 'Populating test directory'
 
 	mkdir -p "${test_dir}"
 
@@ -261,7 +261,7 @@ a delimiter, simply press Enter.' 0 s
 test_stdin() {
 	local tmp_dir="${1}"
 
-	heading "Reading test input"
+	heading 'Reading test input'
 
 	if read_file "${tmp_dir}/_judge_stdin.in" $'\n' 'Test input' 1; then
 		log 'Made test input from stdin.' 1 s
@@ -302,7 +302,7 @@ copy_tests() {
 	local test_dir="${1}"
 	local tmp_dir="${2}"
 
-	heading "Loading tests"
+	heading 'Loading tests'
 
 	local num_loaded=0
 	local test_file
@@ -394,9 +394,9 @@ run() {
 
 	local test_out="${test_name}.out"
 	if [ -f "${test_out}" ]; then
-		local diff_width=$(( $(wc -L < "${test_my}") + $(wc -L < "${test_out}") + 8 ))
+		local diff_width=$(( $(wc -L < "${test_my}") + $(wc -L < "${test_out}") + 16 ))
 		local test_diff="${test_name}.diff"
-		diff --color=always --side-by-side --width=${diff_width} \
+		diff --color=always --side-by-side --width=${diff_width} --expand-tabs \
 			"${test_my}" "${test_out}" > "${test_diff}"
 		local diff_status="$?"
 	else
@@ -533,21 +533,26 @@ main() {
 	local orig_dir="$(dirname "${orig_src_file}")"
 	local src_file="$(basename "${orig_src_file}")"
 
+	heading 'Initializing'
+
 	local judgerc="${orig_dir}/.judgerc"
-	[ -f "${judgerc}" ] && source "${judgerc}"
+	if [ -f "${judgerc}" ]; then
+		source "${judgerc}"
+		log "Sourced '${judgerc}'." 1 s
+	fi
 
 	local test_dir="${orig_dir}/$(get_test_dir "${src_file}")"
 	test_dir="${test_dir#./}"
 
 	if (( !interactive && !test_stdin && !make_tests )); then
-		log 'None of the options -itT were given, and stdin is not a terminal. Option -i implied.' 0 y
+		log 'None of the options -itT were given, and stdin is not a terminal. Option -i implied.' 1 y
 		test_stdin=2
 	fi
 
 	case "${make_tests}" in
 		1)
 			if [ -d "${test_dir}" ]; then
-				log "Option -t ignored, since test directory '${test_dir}' already exists. Use -T to make more tests." 0 y
+				log "Option -t ignored, since test directory '${test_dir}' already exists. Use -T to make more tests." 1 y
 			else
 				make_tests "${test_dir}"
 			fi
@@ -558,11 +563,12 @@ main() {
 	esac
 
 	local tmp_dir="$(mktemp --tmpdir -d "judge-$(date +'%Y-%m-%d-%H-%M-%S')-XXXXXXXXXX")"
+	log "Using temporary directory '${tmp_dir}'." 1 s
 
 	if [ -d "${test_dir}" ]; then
 		copy_tests "${test_dir}" "${tmp_dir}"
 	elif (( !test_stdin )); then
-		log "Test directory '${test_dir}' does not exist. Option -i implied." 0 s
+		log "Test directory '${test_dir}' does not exist. Option -i implied." 1 s
 		test_stdin=2
 	fi
 
