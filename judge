@@ -215,8 +215,6 @@ get_run_cmd() {
 make_tests() {
 	local test_dir="${1}"
 
-	(( make_tests )) || return 0
-
 	heading "Populating test directory"
 
 	mkdir -p "${test_dir}"
@@ -260,7 +258,7 @@ a delimiter, simply press Enter.' 0 s
 	log "Created ${tests_made} test(s)." 1
 }
 
-test_input() {
+test_stdin() {
 	local tmp_dir="${1}"
 
 	heading "Reading test input"
@@ -440,19 +438,36 @@ run() {
 
 usage() {
 	cat << EOF
-Usage: judge [OPTION]... SOURCE_CODE
-Compile and run source code against test inputs.
+Usage: judge [OPTION]... SOURCE_FILE
+Compile source code, run it with test inputs, and compare the results to the
+expected outputs.
 
-    -h, --help          Show this help message.
-    -i, --test-input    Read a test input from standard input.
-    -t, --make-tests    Use standard input to generate test input/output files.
-        --version       Show version information.
+-h, --help		Show this help message.
+
+-i, --test-stdin	Read a test input from stdin and print the compiled
+			program's output to stdout, unless there is nothing to
+			read. If there is no test directory for this source file
+			and neither -t nor -T are specified, this option is
+			implied. If stdin is not a terminal, this option is also
+			implied.
+
+-T, --make-more-tests	Create the test directory for this source file, then
+			read from stdin to populate the directory with test
+			inputs and expected outputs. If the -t and -i options
+			are both given, the input for -t will be read before the
+			input for -i. If the test directory already exists, make
+			more tests.
+
+-t, --make-tests	Same as -T, but do nothing if the test directory already
+			exists.
+
+    --version		Show version and license information.
 EOF
 }
 
 version() {
 	cat << EOF
-local-cp-judge 0.2.3
+local-cp-judge 0.2.4
 
 Copyright (C) 2021 Justin Yao Du.
 Licensed under the MIT License.
@@ -472,7 +487,7 @@ main() {
 	command -v time &> /dev/null
 	use_builtin_time="$?"
 
-	test_input=0
+	test_stdin=0
 	make_tests=0
 
 	local orig_src_file=""
@@ -485,12 +500,16 @@ main() {
 				usage
 				exit
 				;;
-			-i|--test-input)
-				test_input=1
+			-i|--test-stdin)
+				test_stdin=1
 				continue
 				;;
 			-t|--make-tests)
 				make_tests=1
+				continue
+				;;
+			-T|--make-more-tests)
+				make_tests=2
 				continue
 				;;
 			--version)
@@ -520,26 +539,37 @@ main() {
 	local test_dir="${orig_dir}/$(get_test_dir "${src_file}")"
 	test_dir="${test_dir#./}"
 
-	if (( !interactive && !test_input && !make_tests )); then
-		local message='Standard input is not a terminal, but neither --test-input nor'
+	if (( !interactive && !test_stdin && !make_tests )); then
+		local message='Standard input is not a terminal, but neither --test-stdin nor'
 		message+=' --make-tests were specified. If anything is piped to standard input,'
 		message+=' it will be interpreted as a test input.'
-		test_input=2
+		test_stdin=2
 		log "${message}" 1 y
 	fi
 
-	(( make_tests )) && make_tests "${test_dir}"
+	case "${make_tests}" in
+		1)
+			if [ -d "${test_dir}" ]; then
+				log "Option -t ignored, since test directory '${test_dir}' already exists. Use -T to make more tests." 0 y
+			else
+				make_tests "${test_dir}"
+			fi
+			;;
+		2)
+			make_tests "${test_dir}"
+			;;
+	esac
 
 	local tmp_dir="$(mktemp --tmpdir -d "judge-$(date +'%Y-%m-%d-%H-%M-%S')-XXXXXXXXXX")"
 
 	if [ -d "${test_dir}" ]; then
 		copy_tests "${test_dir}" "${tmp_dir}"
-	elif (( !test_input )); then
-		log "Test directory does not exist: '${test_dir}'. Interpreting standard input as a test input." 0 y
-		test_input=2
+	elif (( !test_stdin )); then
+		log "Test directory '${test_dir}' does not exist. Option -i implied."
+		test_stdin=2
 	fi
 
-	(( test_input )) && test_input "${tmp_dir}"
+	(( test_stdin )) && test_stdin "${tmp_dir}"
 
 	cp "${orig_src_file}" "${tmp_dir}"
 
