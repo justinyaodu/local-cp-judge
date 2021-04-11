@@ -188,7 +188,11 @@ get_compile_cmd() {
 			compile_cmd=(${PY} ${PYFLAGS} "${src_file}")
 			;;
 		*)
-			return 1
+			if [ -x "${src_file}" ]; then
+				compile_cmd=(true)
+			else
+				return 1
+			fi
 			;;
 	esac
 }
@@ -207,7 +211,12 @@ get_run_cmd() {
 			run_cmd=(${PY} ${PYRUN} "${src_file}")
 			;;
 		*)
-			return 1
+			if [ -x "${src_file}" ]; then
+				[ "$(basename "${src_file}")" == "${src_file}" ] && src_file="./${src_file}"
+				run_cmd=("${src_file}")
+			else
+				return 1
+			fi
 			;;
 	esac
 }
@@ -438,7 +447,7 @@ run() {
 
 usage() {
 	cat << EOF
-Usage: judge [OPTION]... SOURCE_FILE
+Usage: judge [option]... source_file [source_file...]
 Compile source code, run it with test inputs, and compare the results to the
 expected outputs.
 
@@ -446,17 +455,16 @@ expected outputs.
 
 -i, --test-stdin	Read a test input from stdin and print the compiled
 			program's output to stdout, unless there is nothing to
-			read. If there is no test directory for this source file
-			and neither -t nor -T are specified, this option is
-			implied. If stdin is not a terminal, this option is also
-			implied.
+			read. If there is no test directory for this program and
+			neither -t nor -T are specified, this option is implied.
+			If stdin is not a terminal, this option is also implied.
 
--T, --make-more-tests	Create the test directory for this source file, then
-			read from stdin to populate the directory with test
-			inputs and expected outputs. If the -t and -i options
-			are both given, the input for -t will be read before the
-			input for -i. If the test directory already exists, make
-			more tests.
+-T, --make-more-tests	Create the test directory for this program, then read
+			from stdin to populate the directory with test inputs
+			and expected outputs. If the -t and -i options are both
+			given, the input for -t will be read before the input
+			for -i. If the test directory already exists, make more
+			tests.
 
 -t, --make-tests	Same as -T, but do nothing if the test directory already
 			exists.
@@ -467,7 +475,7 @@ EOF
 
 version() {
 	cat << EOF
-local-cp-judge 0.2.4
+local-cp-judge 0.2.5
 
 Copyright (C) 2021 Justin Yao Du.
 Licensed under the MIT License.
@@ -490,7 +498,7 @@ main() {
 	test_stdin=0
 	make_tests=0
 
-	local orig_src_file=""
+	local orig_src_files=()
 
 	while (( $# )); do
 		local arg="${1}"
@@ -502,15 +510,12 @@ main() {
 				;;
 			-i|--test-stdin)
 				test_stdin=1
-				continue
 				;;
 			-t|--make-tests)
 				make_tests=1
-				continue
 				;;
 			-T|--make-more-tests)
 				make_tests=2
-				continue
 				;;
 			--version)
 				version
@@ -520,18 +525,20 @@ main() {
 				die_usage "Unrecognized option '${arg}'."
 				;;
 			*)
-				orig_src_file="${arg}"
-				(( $# )) && die_usage "Trailing argument(s): '$@'."
-				break
+				orig_src_files+=("${arg}")
 				;;
 		esac
 	done
 
-	[ "${orig_src_file}" ] || die_usage "No source code file specified."
-	[ -f "${orig_src_file}" ] || die "File does not exist: '${orig_src_file}'."
+	(( ${#orig_src_files[@]} )) || die_usage "No source code files specified."
+
+	local orig_src_file
+	for orig_src_file in "${orig_src_files[@]}"; do
+		[ -f "${orig_src_file}" ] || die "File does not exist: '${orig_src_file}'."
+	done
 
 	local orig_dir="$(dirname "${orig_src_file}")"
-	local src_file="$(basename "${orig_src_file}")"
+	local src_file="$(basename "${orig_src_files[0]}")"
 
 	heading 'Initializing'
 
@@ -574,7 +581,7 @@ main() {
 
 	(( test_stdin )) && test_stdin "${tmp_dir}"
 
-	cp "${orig_src_file}" "${tmp_dir}"
+	cp "${orig_src_files[@]}" "${tmp_dir}"
 
 	pushd "${tmp_dir}" &> /dev/null
 
