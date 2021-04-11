@@ -28,7 +28,6 @@ See `judge --help`.
 ## Possible Improvements
 
 * Warn about files that contain control characters or are missing a newline on the last line
-* Support compilation of multiple source files into a single program
 * Add a command-line option to print the default `.judgerc`
 * Allow short options to be combined
 * Output a summary at the end
